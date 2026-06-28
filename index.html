@@ -1972,30 +1972,6 @@ async function searchVisit() {
     const cv   = (idx) => cellVal(match, idx);
     const cols = headers;
 
-    if (rows.length === 0) { st.textContent = '❌ Sheet appears empty.'; return; }
-
-    // Helper: get cell value safely
-    const cellVal = (row, idx) => {
-      const c = (row.c || [])[idx];
-      return (c && c.v != null) ? String(c.v) : '';
-    };
-
-    // Search col B (idx 1) = Quote Ref, col E (idx 4) = Company Name
-    const qLower = q.toLowerCase();
-    const match = rows.find(row => {
-      const qRef = cellVal(row, 1).toLowerCase();
-      const comp = cellVal(row, 4).toLowerCase();
-      return qRef.includes(qLower) || comp.includes(qLower);
-    });
-
-    if (!match) {
-      st.textContent = '❌ No visit found matching "' + q + '". Try quote ref (e.g. ADW/1) or company name.';
-      return;
-    }
-
-    // Read all cells from matched row
-    const cv = (idx) => cellVal(match, idx);
-
     // Reconstruct allDoorsText from the webhook payload stored in col J (idx 9)
     // The form sends allDoorsText as a single block into col J via Make.com
     // Also check if doors are in separate columns (J onward) and rebuild if needed
