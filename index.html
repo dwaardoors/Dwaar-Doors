@@ -1945,6 +1945,9 @@ async function searchVisit() {
     const csv = await res.text();
     const allRows = parseCSV(csv);
     const dataRows = allRows.slice(1); // skip header
+    // Debug: show first data row col B and E
+    st.textContent = `📊 Found ${dataRows.length} rows. Row1 col B="${dataRows[0]?.[1]}" col E="${dataRows[0]?.[4]}"`;
+    await new Promise(r => setTimeout(r, 3000)); // show for 3 sec
     const ql = q.toLowerCase();
     let found = null;
     for (const cols of dataRows) {
