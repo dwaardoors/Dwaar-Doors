@@ -1927,22 +1927,11 @@ function switchView(v) {
 // ═══════════════════════════════════════
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
-const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
+const MAKE_WEBHOOK = 'https://hook.eu1.make.com/19924dqi5qcat1w8mosheks44n5noct7';
 let _visit = null;
 let _doors = [];
 
 const ALL_ACCESSORIES = ['Door Closer','Panic Bar','Trim Lever','Tower Bolt','D-Type Handle','Vision Panel'];
-
-function fetchSheetData() {
-  return new Promise((resolve, reject) => {
-    const cb = 'gviz_' + Date.now();
-    const s = document.createElement('script');
-    window[cb] = function(data) { delete window[cb]; document.body.removeChild(s); resolve(data); };
-    s.onerror = () => { delete window[cb]; reject(new Error('Failed to load sheet')); };
-    s.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:json&callback=' + cb + '&sheet=Sheet1';
-    document.body.appendChild(s);
-  });
-}
 
 async function searchVisit() {
   const q = document.getElementById('searchInput').value.trim();
@@ -1950,30 +1939,25 @@ async function searchVisit() {
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
   st.textContent = '⏳ Searching...';
   try {
-    const data = await fetchSheetData();
-    const rows = data.table.rows;
-    const ql = q.toLowerCase();
-    const found = rows.find(r => {
-      const ref = (r.c[1]?.v || '').toString().toLowerCase();
-      const co  = (r.c[4]?.v || '').toString().toLowerCase();
-      return ref.includes(ql) || co.includes(ql);
-    });
-    if (!found) { st.textContent = '❌ No visit found for "' + q + '".'; return; }
+    const res = await fetch(MAKE_WEBHOOK + '?q=' + encodeURIComponent(q));
+    if (!res.ok) { st.textContent = '❌ No visit found for "' + q + '".'; return; }
+    const data = await res.json();
+    if (!data || !data.quoteRef) { st.textContent = '❌ No visit found for "' + q + '".'; return; }
     _visit = {
-      quoteRef:      (found.c[1]?.v || '').toString(),
-      visitDate:     (found.c[2]?.v || '').toString(),
-      salesExec:     (found.c[3]?.v || '').toString(),
-      company:       (found.c[4]?.v || '').toString(),
-      contactPerson: (found.c[5]?.v || '').toString(),
-      mobile:        (found.c[6]?.v || '').toString(),
-      email:         (found.c[7]?.v || '').toString(),
-      siteAddress:   (found.c[8]?.v || '').toString(),
-      allDoorsText:  (found.c[9]?.v || '').toString(),
-      totalDoors:    found.c[10]?.v || 0,
-      colour:        (found.c[31]?.v || '').toString(),
-      installation:  (found.c[32]?.v || '').toString(),
-      transportation:(found.c[33]?.v || '').toString(),
-      notes:         (found.c[34]?.v || '').toString()
+      quoteRef:      data.quoteRef || '',
+      visitDate:     data.visitDate || '',
+      salesExec:     data.salesExec || '',
+      company:       data.company || '',
+      contactPerson: data.contactPerson || '',
+      mobile:        data.mobile || '',
+      email:         data.email || '',
+      siteAddress:   data.siteAddress || '',
+      allDoorsText:  data.allDoorsText || '',
+      totalDoors:    data.totalDoors || 0,
+      colour:        data.colour || '',
+      installation:  data.installation || '',
+      transportation:data.transportation || '',
+      notes:         data.notes || ''
     };
     _doors = parseDoors(_visit.allDoorsText);
     st.textContent = '✅ Loaded: ' + _visit.company + ' — ' + _visit.quoteRef;
