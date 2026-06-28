@@ -1927,67 +1927,50 @@ function switchView(v) {
 // ═══════════════════════════════════════
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
-// ── Google Sheets → JSONP (script-tag) — no CORS issues on GitHub Pages ──
+// ── Google Sheets published CSV — fetch() with CORS headers ─────────────
 const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
+// Published-to-web CSV (File → Share → Publish to web → Sheet1 → CSV)
+// This endpoint includes Access-Control-Allow-Origin:* so fetch() works from any domain.
+const PUB_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS5a1dFQEl1XMNPFC8AZbgaqWiFfb2tYSXeOdYl3LB7ApTwl1VG5lakD41DZmZO7ryQB0fooqs4oly3/pub?gid=0&single=true&output=csv';
 
 let _visit = null;
 let _doors = [];
 
 const ALL_ACCESSORIES = ['Door Closer','Panic Bar','Trim Lever','Tower Bolt','D-Type Handle','Vision Panel'];
 
-// Column indices: A=0,B=1,...,E=4,J=9,AF=31,AG=32,AH=33,AI=34
-
-/**
- * Load the Google Sheet via JSONP (script-tag injection).
- * Works from ANY static host (GitHub Pages, file://, etc.) because it
- * never sends a cross-origin XHR — the browser treats the response as JS.
- *
- * The sheet must be shared "Anyone with link can view" (or published to web).
- * Note: tqx uses semicolons as separators inside the value.
- */
-function loadSheetJSONP() {
-  return new Promise(function(resolve, reject) {
-    var cbName = '__gvizCb_' + Date.now();
-    var timer = setTimeout(function() {
-      cleanup();
-      reject(new Error('Timed out — check sheet is shared "Anyone with link can view" and retry.'));
-    }, 15000);
-
-    function cleanup() {
-      clearTimeout(timer);
-      delete window[cbName];
-      var s = document.getElementById('__gvizScript');
-      if (s) s.parentNode.removeChild(s);
-    }
-
-    window[cbName] = function(response) {
-      cleanup();
-      resolve(response);
-    };
-
-    var script = document.createElement('script');
-    script.id = '__gvizScript';
-    // tqx value: semicolon-separated options; responseHandler sets the JSONP callback name
-    script.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID
-               + '/gviz/tq?tqx=out:json;responseHandler:' + cbName
-               + '&sheet=Sheet1&gid=0';
-    script.onerror = function() {
-      cleanup();
-      reject(new Error('Script load failed — check internet connection and sheet sharing.'));
-    };
-    document.head.appendChild(script);
-  });
-}
+// Column indices: A=0,B=1,C=2,D=3,E=4,F=5,G=6,H=7,I=8,J=9,...,AF=31,AG=32,AH=33,AI=34
 
 async function searchVisit() {
   const q = document.getElementById('searchInput').value.trim();
   const st = document.getElementById('searchStatus');
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
-  st.textContent = '⏳ Searching Google Sheets…';
+  st.textContent = '⏳ Searching…';
   try {
-    const gData = await loadSheetJSONP();
-    const rows = (gData.table && gData.table.rows) ? gData.table.rows : [];
-    const cols = (gData.table && gData.table.cols) ? gData.table.cols : [];
+    const res = await fetch(PUB_CSV + '&t=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' — is the sheet published to web?');
+    const text = await res.text();
+    const allRows = parseCSV(text);
+    if (allRows.length < 2) { st.textContent = '❌ Sheet appears empty.'; return; }
+
+    const headers  = allRows[0];
+    const dataRows = allRows.slice(1).filter(r => r.some(c => c));
+    if (dataRows.length === 0) { st.textContent = '❌ No data rows found.'; return; }
+
+    const cellVal = (row, idx) => (idx < row.length ? String(row[idx] || '') : '').trim();
+    const qLower = q.toLowerCase();
+    const match = dataRows.find(row => {
+      const qRef = cellVal(row, 1).toLowerCase();
+      const comp = cellVal(row, 4).toLowerCase();
+      return qRef.includes(qLower) || comp.includes(qLower);
+    });
+
+    if (!match) {
+      st.textContent = '❌ No visit found matching "' + q + '". Try quote ref (e.g. ADW/1) or company name.';
+      return;
+    }
+
+    const cv   = (idx) => cellVal(match, idx);
+    const cols = headers;
 
     if (rows.length === 0) { st.textContent = '❌ Sheet appears empty.'; return; }
 
@@ -2028,7 +2011,7 @@ async function searchVisit() {
       const doorParts = [];
       for (let i = 9; i <= 30; i++) {
         const v = cv(i);
-        if (v) doorParts.push(cols[i] ? cols[i].label + ': ' + v : v);
+        if (v) doorParts.push(cols[i] ? cols[i] + ': ' + v : v);
       }
       allDoorsText = doorParts.join('\n');
     }
