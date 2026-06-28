@@ -1927,40 +1927,73 @@ function switchView(v) {
 // ═══════════════════════════════════════
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
-const MAKE_WEBHOOK = 'https://hook.eu1.make.com/19924dqi5qcat1w8mosheks44n5noct7';
+// Direct Google Sheets read — no Make.com needed for search
+const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
+const GVIZ_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:json&sheet=Sheet1';
+
 let _visit = null;
 let _doors = [];
 
 const ALL_ACCESSORIES = ['Door Closer','Panic Bar','Trim Lever','Tower Bolt','D-Type Handle','Vision Panel'];
 
+// Column indices (0-based): A=0,B=1,C=2,D=3,E=4,F=5,G=6,H=7,I=8,J=9,K=10,...,AF=31,AG=32,AH=33,AI=34
+// A=Submission Date, B=Quote Ref, C=Visit Date, D=Sales Exec, E=Company, F=Contact, G=Mobile, H=Email,
+// I=Site Address, J=All Doors Text, K=Total Doors, AF=Colour, AG=Installation, AH=Transportation, AI=Notes
+const COL = { submissionDate:0, quoteRef:1, visitDate:2, salesExec:3, company:4, contactPerson:5,
+              mobile:6, email:7, siteAddress:8, allDoorsText:9, totalDoors:10,
+              colour:31, installation:32, transportation:33, notes:34 };
+
 async function searchVisit() {
   const q = document.getElementById('searchInput').value.trim();
   const st = document.getElementById('searchStatus');
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
-  st.textContent = '⏳ Searching...';
+  st.textContent = '⏳ Searching Google Sheets...';
   try {
-    const res = await fetch(MAKE_WEBHOOK + '?q=' + encodeURIComponent(q));
-    if (!res.ok) { st.textContent = '❌ No visit found for "' + q + '".'; return; }
-    const data = await res.json();
-    if (!data || !data.quoteRef) { st.textContent = '❌ No visit found for "' + q + '".'; return; }
+    const res = await fetch(GVIZ_URL);
+    if (!res.ok) throw new Error('Could not reach Google Sheets (status ' + res.status + ')');
+    const text = await res.text();
+    // Strip JSONP wrapper: google.visualization.Query.setResponse({...})
+    const jsonStr = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+    const gData = JSON.parse(jsonStr);
+    const rows = (gData.table && gData.table.rows) ? gData.table.rows : [];
+
+    // Search: match quote ref (col B) OR company name (col E), case-insensitive
+    const qLower = q.toLowerCase();
+    const match = rows.find(row => {
+      const cells = row.c || [];
+      const quoteRef = (cells[COL.quoteRef] && cells[COL.quoteRef].v) ? String(cells[COL.quoteRef].v) : '';
+      const company  = (cells[COL.company]  && cells[COL.company].v)  ? String(cells[COL.company].v)  : '';
+      return quoteRef.toLowerCase().includes(qLower) || company.toLowerCase().includes(qLower);
+    });
+
+    if (!match) {
+      st.textContent = '❌ No visit found matching "' + q + '". Check the quote ref or company name.';
+      return;
+    }
+
+    // Extract all fields from the matched row
+    const cells = match.c || [];
+    const getVal = (idx) => (cells[idx] && cells[idx].v != null) ? String(cells[idx].v) : '';
+
     _visit = {
-      quoteRef:      data.quoteRef || '',
-      visitDate:     data.visitDate || '',
-      salesExec:     data.salesExec || '',
-      company:       data.company || '',
-      contactPerson: data.contactPerson || '',
-      mobile:        data.mobile || '',
-      email:         data.email || '',
-      siteAddress:   data.siteAddress || '',
-      allDoorsText:  data.allDoorsText || '',
-      totalDoors:    data.totalDoors || 0,
-      colour:        data.colour || '',
-      installation:  data.installation || '',
-      transportation:data.transportation || '',
-      notes:         data.notes || ''
+      quoteRef:      getVal(COL.quoteRef),
+      visitDate:     getVal(COL.visitDate),
+      salesExec:     getVal(COL.salesExec),
+      company:       getVal(COL.company),
+      contactPerson: getVal(COL.contactPerson),
+      mobile:        getVal(COL.mobile),
+      email:         getVal(COL.email),
+      siteAddress:   getVal(COL.siteAddress),
+      allDoorsText:  getVal(COL.allDoorsText),
+      totalDoors:    getVal(COL.totalDoors),
+      colour:        getVal(COL.colour),
+      installation:  getVal(COL.installation),
+      transportation:getVal(COL.transportation),
+      notes:         getVal(COL.notes)
     };
+
     _doors = parseDoors(_visit.allDoorsText);
-    st.textContent = '✅ Loaded: ' + _visit.company + ' — ' + _visit.quoteRef;
+    st.textContent = '✅ Loaded: ' + _visit.company + ' — ' + _visit.quoteRef + ' (' + _doors.length + ' door group' + (_doors.length !== 1 ? 's' : '') + ')';
     renderBuilder();
   } catch(e) {
     st.textContent = '❌ Error: ' + e.message;
