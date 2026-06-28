@@ -1927,21 +1927,17 @@ function switchView(v) {
 // ═══════════════════════════════════════
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
-// Direct Google Sheets read — no Make.com needed for search
+// Direct Google Sheets read via CSV export — no Make.com needed for search
 const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
-const GVIZ_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:json';
+// CSV export URL — requires sheet to be shared "Anyone with link can view"
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/export?format=csv&id=' + SHEET_ID;
 
 let _visit = null;
 let _doors = [];
 
 const ALL_ACCESSORIES = ['Door Closer','Panic Bar','Trim Lever','Tower Bolt','D-Type Handle','Vision Panel'];
 
-// Column indices (0-based): A=0,B=1,C=2,D=3,E=4,F=5,G=6,H=7,I=8,J=9,K=10,...,AF=31,AG=32,AH=33,AI=34
-// A=Submission Date, B=Quote Ref, C=Visit Date, D=Sales Exec, E=Company, F=Contact, G=Mobile, H=Email,
-// I=Site Address, J=All Doors Text, K=Total Doors, AF=Colour, AG=Installation, AH=Transportation, AI=Notes
-const COL = { submissionDate:0, quoteRef:1, visitDate:2, salesExec:3, company:4, contactPerson:5,
-              mobile:6, email:7, siteAddress:8, allDoorsText:9, totalDoors:10,
-              colour:31, installation:32, transportation:33, notes:34 };
+// Column indices: A=0,B=1,...,E=4,J=9,AF=31,AG=32,AH=33,AI=34
 
 async function searchVisit() {
   const q = document.getElementById('searchInput').value.trim();
@@ -1949,47 +1945,48 @@ async function searchVisit() {
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
   st.textContent = '⏳ Searching Google Sheets...';
   try {
-    const res = await fetch(GVIZ_URL);
-    if (!res.ok) throw new Error('Could not reach Google Sheets (status ' + res.status + ')');
-    const text = await res.text();
-    // Strip JSONP wrapper: google.visualization.Query.setResponse({...})
-    const jsonStr = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
-    const gData = JSON.parse(jsonStr);
-    const rows = (gData.table && gData.table.rows) ? gData.table.rows : [];
+    const res = await fetch(CSV_URL);
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        throw new Error('Sheet not public. Go to Google Sheets → Share → "Anyone with link can view"');
+      }
+      throw new Error('Could not reach Google Sheets (status ' + res.status + '). Check sheet sharing settings.');
+    }
+    const csvText = await res.text();
+    const allRows = parseCSV(csvText);
+    if (allRows.length < 2) { st.textContent = '❌ Sheet appears empty.'; return; }
 
-    // Search: match quote ref (col B) OR company name (col E), case-insensitive
+    // Row 0 = headers, rows 1+ = data
+    // Col indices: A=0,B=1,C=2,D=3,E=4,F=5,G=6,H=7,I=8,J=9,K=10,...,AF=31,AG=32,AH=33,AI=34
     const qLower = q.toLowerCase();
-    const match = rows.find(row => {
-      const cells = row.c || [];
-      const quoteRef = (cells[COL.quoteRef] && cells[COL.quoteRef].v) ? String(cells[COL.quoteRef].v) : '';
-      const company  = (cells[COL.company]  && cells[COL.company].v)  ? String(cells[COL.company].v)  : '';
-      return quoteRef.toLowerCase().includes(qLower) || company.toLowerCase().includes(qLower);
+    const matchRow = allRows.slice(1).find(row => {
+      const quoteRef = (row[1] || '').toLowerCase();
+      const company  = (row[4] || '').toLowerCase();
+      return quoteRef.includes(qLower) || company.includes(qLower);
     });
 
-    if (!match) {
-      st.textContent = '❌ No visit found matching "' + q + '". Check the quote ref or company name.';
+    if (!matchRow) {
+      st.textContent = '❌ No visit found matching "' + q + '". Try the exact quote ref (e.g. ADW/1) or company name.';
       return;
     }
 
-    // Extract all fields from the matched row
-    const cells = match.c || [];
-    const getVal = (idx) => (cells[idx] && cells[idx].v != null) ? String(cells[idx].v) : '';
+    const getVal = (idx) => (matchRow[idx] || '').trim();
 
     _visit = {
-      quoteRef:      getVal(COL.quoteRef),
-      visitDate:     getVal(COL.visitDate),
-      salesExec:     getVal(COL.salesExec),
-      company:       getVal(COL.company),
-      contactPerson: getVal(COL.contactPerson),
-      mobile:        getVal(COL.mobile),
-      email:         getVal(COL.email),
-      siteAddress:   getVal(COL.siteAddress),
-      allDoorsText:  getVal(COL.allDoorsText),
-      totalDoors:    getVal(COL.totalDoors),
-      colour:        getVal(COL.colour),
-      installation:  getVal(COL.installation),
-      transportation:getVal(COL.transportation),
-      notes:         getVal(COL.notes)
+      quoteRef:      getVal(1),
+      visitDate:     getVal(2),
+      salesExec:     getVal(3),
+      company:       getVal(4),
+      contactPerson: getVal(5),
+      mobile:        getVal(6),
+      email:         getVal(7),
+      siteAddress:   getVal(8),
+      allDoorsText:  getVal(9),
+      totalDoors:    getVal(10),
+      colour:        getVal(31),
+      installation:  getVal(32),
+      transportation:getVal(33),
+      notes:         getVal(34)
     };
 
     _doors = parseDoors(_visit.allDoorsText);
