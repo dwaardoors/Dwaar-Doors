@@ -1927,10 +1927,10 @@ function switchView(v) {
 // ═══════════════════════════════════════
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
-// Direct Google Sheets read via CSV export — no Make.com needed for search
+// Direct Google Sheets read via gviz — no Make.com needed for search
 const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
-// CSV export URL — requires sheet to be shared "Anyone with link can view"
-const CSV_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/export?format=csv&id=' + SHEET_ID;
+// gviz JSON endpoint — sheet tab is named "Sheet1"
+const GVIZ_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:json&sheet=Sheet1&gid=0';
 
 let _visit = null;
 let _doors = [];
@@ -1945,48 +1945,74 @@ async function searchVisit() {
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
   st.textContent = '⏳ Searching Google Sheets...';
   try {
-    const res = await fetch(CSV_URL);
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
-        throw new Error('Sheet not public. Go to Google Sheets → Share → "Anyone with link can view"');
-      }
-      throw new Error('Could not reach Google Sheets (status ' + res.status + '). Check sheet sharing settings.');
-    }
-    const csvText = await res.text();
-    const allRows = parseCSV(csvText);
-    if (allRows.length < 2) { st.textContent = '❌ Sheet appears empty.'; return; }
+    const res = await fetch(GVIZ_URL);
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' — check sheet is shared "Anyone with link can view"');
+    const text = await res.text();
+    // Strip JSONP wrapper
+    const jsonStr = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+    const gData = JSON.parse(jsonStr);
+    const rows = (gData.table && gData.table.rows) ? gData.table.rows : [];
+    const cols = (gData.table && gData.table.cols) ? gData.table.cols : [];
 
-    // Row 0 = headers, rows 1+ = data
-    // Col indices: A=0,B=1,C=2,D=3,E=4,F=5,G=6,H=7,I=8,J=9,K=10,...,AF=31,AG=32,AH=33,AI=34
+    if (rows.length === 0) { st.textContent = '❌ Sheet appears empty.'; return; }
+
+    // Helper: get cell value safely
+    const cellVal = (row, idx) => {
+      const c = (row.c || [])[idx];
+      return (c && c.v != null) ? String(c.v) : '';
+    };
+
+    // Search col B (idx 1) = Quote Ref, col E (idx 4) = Company Name
     const qLower = q.toLowerCase();
-    const matchRow = allRows.slice(1).find(row => {
-      const quoteRef = (row[1] || '').toLowerCase();
-      const company  = (row[4] || '').toLowerCase();
-      return quoteRef.includes(qLower) || company.includes(qLower);
+    const match = rows.find(row => {
+      const qRef = cellVal(row, 1).toLowerCase();
+      const comp = cellVal(row, 4).toLowerCase();
+      return qRef.includes(qLower) || comp.includes(qLower);
     });
 
-    if (!matchRow) {
-      st.textContent = '❌ No visit found matching "' + q + '". Try the exact quote ref (e.g. ADW/1) or company name.';
+    if (!match) {
+      st.textContent = '❌ No visit found matching "' + q + '". Try quote ref (e.g. ADW/1) or company name.';
       return;
     }
 
-    const getVal = (idx) => (matchRow[idx] || '').trim();
+    // Read all cells from matched row
+    const cv = (idx) => cellVal(match, idx);
+
+    // Reconstruct allDoorsText from the webhook payload stored in col J (idx 9)
+    // The form sends allDoorsText as a single block into col J via Make.com
+    // Also check if doors are in separate columns (J onward) and rebuild if needed
+    let allDoorsText = cv(9);
+
+    // If col J doesn't look like door text, try to rebuild from individual door columns
+    // The sheet may store: J=All Doors Text (the formatted block from buildPayload)
+    // or it may store individual door fields starting from col J
+    // We use the formatted block if it contains "--- DOOR"
+    if (!allDoorsText.includes('--- DOOR') && !allDoorsText.includes('DOOR')) {
+      // Try to find door data in columns — look for columns with "Door 1" header pattern
+      // We'll collect all non-empty values from col J onward up to col AE (idx 30)
+      const doorParts = [];
+      for (let i = 9; i <= 30; i++) {
+        const v = cv(i);
+        if (v) doorParts.push(cols[i] ? cols[i].label + ': ' + v : v);
+      }
+      allDoorsText = doorParts.join('\n');
+    }
 
     _visit = {
-      quoteRef:      getVal(1),
-      visitDate:     getVal(2),
-      salesExec:     getVal(3),
-      company:       getVal(4),
-      contactPerson: getVal(5),
-      mobile:        getVal(6),
-      email:         getVal(7),
-      siteAddress:   getVal(8),
-      allDoorsText:  getVal(9),
-      totalDoors:    getVal(10),
-      colour:        getVal(31),
-      installation:  getVal(32),
-      transportation:getVal(33),
-      notes:         getVal(34)
+      quoteRef:      cv(1),
+      visitDate:     cv(2),
+      salesExec:     cv(3),
+      company:       cv(4),
+      contactPerson: cv(5),
+      mobile:        cv(6),
+      email:         cv(7),
+      siteAddress:   cv(8),
+      allDoorsText:  allDoorsText,
+      totalDoors:    cv(10),
+      colour:        cv(31),
+      installation:  cv(32),
+      transportation:cv(33),
+      notes:         cv(34)
     };
 
     _doors = parseDoors(_visit.allDoorsText);
