@@ -1927,10 +1927,8 @@ function switchView(v) {
 // ═══════════════════════════════════════
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
-// Direct Google Sheets read via gviz — no Make.com needed for search
+// ── Google Sheets → JSONP (script-tag) — no CORS issues on GitHub Pages ──
 const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
-// gviz JSON endpoint — sheet tab is named "Sheet1"
-const GVIZ_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:json&sheet=Sheet1&gid=0';
 
 let _visit = null;
 let _doors = [];
@@ -1939,18 +1937,55 @@ const ALL_ACCESSORIES = ['Door Closer','Panic Bar','Trim Lever','Tower Bolt','D-
 
 // Column indices: A=0,B=1,...,E=4,J=9,AF=31,AG=32,AH=33,AI=34
 
+/**
+ * Load the Google Sheet via JSONP (script-tag injection).
+ * Works from ANY static host (GitHub Pages, file://, etc.) because it
+ * never sends a cross-origin XHR — the browser treats the response as JS.
+ *
+ * The sheet must be shared "Anyone with link can view" (or published to web).
+ * Note: tqx uses semicolons as separators inside the value.
+ */
+function loadSheetJSONP() {
+  return new Promise(function(resolve, reject) {
+    var cbName = '__gvizCb_' + Date.now();
+    var timer = setTimeout(function() {
+      cleanup();
+      reject(new Error('Timed out — check sheet is shared "Anyone with link can view" and retry.'));
+    }, 15000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cbName];
+      var s = document.getElementById('__gvizScript');
+      if (s) s.parentNode.removeChild(s);
+    }
+
+    window[cbName] = function(response) {
+      cleanup();
+      resolve(response);
+    };
+
+    var script = document.createElement('script');
+    script.id = '__gvizScript';
+    // tqx value: semicolon-separated options; responseHandler sets the JSONP callback name
+    script.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID
+               + '/gviz/tq?tqx=out:json;responseHandler:' + cbName
+               + '&sheet=Sheet1&gid=0';
+    script.onerror = function() {
+      cleanup();
+      reject(new Error('Script load failed — check internet connection and sheet sharing.'));
+    };
+    document.head.appendChild(script);
+  });
+}
+
 async function searchVisit() {
   const q = document.getElementById('searchInput').value.trim();
   const st = document.getElementById('searchStatus');
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
-  st.textContent = '⏳ Searching Google Sheets...';
+  st.textContent = '⏳ Searching Google Sheets…';
   try {
-    const res = await fetch(GVIZ_URL);
-    if (!res.ok) throw new Error('HTTP ' + res.status + ' — check sheet is shared "Anyone with link can view"');
-    const text = await res.text();
-    // Strip JSONP wrapper
-    const jsonStr = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
-    const gData = JSON.parse(jsonStr);
+    const gData = await loadSheetJSONP();
     const rows = (gData.table && gData.table.rows) ? gData.table.rows : [];
     const cols = (gData.table && gData.table.cols) ? gData.table.cols : [];
 
