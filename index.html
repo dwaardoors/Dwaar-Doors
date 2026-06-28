@@ -1928,11 +1928,21 @@ function switchView(v) {
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
 const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
-const PUBLISHED_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS5a1dFQEl1XMNPFC8AZbgaqWiFfb2tYSXe0dYl3LB7ApTwl1VG5lakD41DZmZO7ryQB0fooqs4oly3/pub?gid=0&single=true&output=csv';
 let _visit = null;
 let _doors = [];
 
 const ALL_ACCESSORIES = ['Door Closer','Panic Bar','Trim Lever','Tower Bolt','D-Type Handle','Vision Panel'];
+
+function fetchSheetData() {
+  return new Promise((resolve, reject) => {
+    const cb = 'gviz_' + Date.now();
+    const s = document.createElement('script');
+    window[cb] = function(data) { delete window[cb]; document.body.removeChild(s); resolve(data); };
+    s.onerror = () => { delete window[cb]; reject(new Error('Failed to load sheet')); };
+    s.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:json&callback=' + cb + '&sheet=Sheet1';
+    document.body.appendChild(s);
+  });
+}
 
 async function searchVisit() {
   const q = document.getElementById('searchInput').value.trim();
@@ -1940,43 +1950,36 @@ async function searchVisit() {
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
   st.textContent = '⏳ Searching...';
   try {
-    const url = PUBLISHED_CSV;
-    const res = await fetch(url);
-    const csv = await res.text();
-    const allRows = parseCSV(csv);
-    const dataRows = allRows.slice(1); // skip header
-    // Debug: show first data row col B and E
-    st.textContent = `📊 Found ${dataRows.length} rows. Row1 col B="${dataRows[0]?.[1]}" col E="${dataRows[0]?.[4]}"`;
-    await new Promise(r => setTimeout(r, 3000)); // show for 3 sec
+    const data = await fetchSheetData();
+    const rows = data.table.rows;
     const ql = q.toLowerCase();
-    let found = null;
-    for (const cols of dataRows) {
-      const ref = (cols[1] || '').toLowerCase().trim();
-      const co  = (cols[4] || '').toLowerCase().trim();
-      if (ref.includes(ql) || co.includes(ql)) { found = cols; break; }
-    }
-    if (!found) { st.textContent = `❌ No visit found for "${q}".`; return; }
+    const found = rows.find(r => {
+      const ref = (r.c[1]?.v || '').toString().toLowerCase();
+      const co  = (r.c[4]?.v || '').toString().toLowerCase();
+      return ref.includes(ql) || co.includes(ql);
+    });
+    if (!found) { st.textContent = '❌ No visit found for "' + q + '".'; return; }
     _visit = {
-      quoteRef: found[1] || '',
-      visitDate: found[2] || '',
-      salesExec: found[3] || '',
-      company: found[4] || '',
-      contactPerson: found[5] || '',
-      mobile: found[6] || '',
-      email: found[7] || '',
-      siteAddress: found[8] || '',
-      allDoorsText: found[9] || '',
-      totalDoors: found[10] || 0,
-      colour: found[31] || '',
-      installation: found[32] || '',
-      transportation: found[33] || '',
-      notes: found[34] || ''
+      quoteRef:      (found.c[1]?.v || '').toString(),
+      visitDate:     (found.c[2]?.v || '').toString(),
+      salesExec:     (found.c[3]?.v || '').toString(),
+      company:       (found.c[4]?.v || '').toString(),
+      contactPerson: (found.c[5]?.v || '').toString(),
+      mobile:        (found.c[6]?.v || '').toString(),
+      email:         (found.c[7]?.v || '').toString(),
+      siteAddress:   (found.c[8]?.v || '').toString(),
+      allDoorsText:  (found.c[9]?.v || '').toString(),
+      totalDoors:    found.c[10]?.v || 0,
+      colour:        (found.c[31]?.v || '').toString(),
+      installation:  (found.c[32]?.v || '').toString(),
+      transportation:(found.c[33]?.v || '').toString(),
+      notes:         (found.c[34]?.v || '').toString()
     };
     _doors = parseDoors(_visit.allDoorsText);
-    st.textContent = `✅ Loaded: ${_visit.company} — ${_visit.quoteRef}`;
+    st.textContent = '✅ Loaded: ' + _visit.company + ' — ' + _visit.quoteRef;
     renderBuilder();
   } catch(e) {
-    st.textContent = '❌ Error fetching data. Check that the Google Sheet is shared publicly.';
+    st.textContent = '❌ Error: ' + e.message;
     console.error(e);
   }
 }
