@@ -1928,6 +1928,7 @@ function switchView(v) {
 //  QUOTATION BUILDER
 // ═══════════════════════════════════════
 const SHEET_ID = '1NY6pPpGFIR7d0JodoBfLq0rZbFBu39MxYNSF8cXQBP8';
+const PUBLISHED_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS5a1dFQEl1XMNPFC8AZbgaqWiFfb2tYSXe0dYl3LB7ApTwl1VG5lakD41DZmZO7ryQB0fooqs4oly3/pub?gid=0&single=true&output=csv';
 let _visit = null;
 let _doors = [];
 
@@ -1939,33 +1940,34 @@ async function searchVisit() {
   if (!q) { st.textContent = 'Please enter a quote ref or company name.'; return; }
   st.textContent = '⏳ Searching...';
   try {
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Sheet1`;
+    const url = PUBLISHED_CSV;
     const res = await fetch(url);
-    const txt = await res.text();
-    const json = JSON.parse(txt.substring(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
-    const rows = json.table.rows;
+    const csv = await res.text();
+    const rows = csv.trim().split('\n').slice(1); // skip header
     const ql = q.toLowerCase();
-    const found = rows.find(r => {
-      const ref = (r.c[1]?.v || '').toLowerCase();
-      const co  = (r.c[4]?.v || '').toLowerCase();
-      return ref.includes(ql) || co.includes(ql);
-    });
+    let found = null;
+    for (const row of rows) {
+      const cols = parseCSVRow(row);
+      const ref = (cols[1] || '').toLowerCase();
+      const co  = (cols[4] || '').toLowerCase();
+      if (ref.includes(ql) || co.includes(ql)) { found = cols; break; }
+    }
     if (!found) { st.textContent = `❌ No visit found for "${q}".`; return; }
     _visit = {
-      quoteRef: found.c[1]?.v || '',
-      visitDate: found.c[2]?.v || '',
-      salesExec: found.c[3]?.v || '',
-      company: found.c[4]?.v || '',
-      contactPerson: found.c[5]?.v || '',
-      mobile: found.c[6]?.v || '',
-      email: found.c[7]?.v || '',
-      siteAddress: found.c[8]?.v || '',
-      allDoorsText: found.c[9]?.v || '',
-      totalDoors: found.c[10]?.v || 0,
-      colour: found.c[31]?.v || '',
-      installation: found.c[32]?.v || '',
-      transportation: found.c[33]?.v || '',
-      notes: found.c[34]?.v || ''
+      quoteRef: found[1] || '',
+      visitDate: found[2] || '',
+      salesExec: found[3] || '',
+      company: found[4] || '',
+      contactPerson: found[5] || '',
+      mobile: found[6] || '',
+      email: found[7] || '',
+      siteAddress: found[8] || '',
+      allDoorsText: found[9] || '',
+      totalDoors: found[10] || 0,
+      colour: found[31] || '',
+      installation: found[32] || '',
+      transportation: found[33] || '',
+      notes: found[34] || ''
     };
     _doors = parseDoors(_visit.allDoorsText);
     st.textContent = `✅ Loaded: ${_visit.company} — ${_visit.quoteRef}`;
@@ -1974,6 +1976,19 @@ async function searchVisit() {
     st.textContent = '❌ Error fetching data. Check that the Google Sheet is shared publicly.';
     console.error(e);
   }
+}
+
+function parseCSVRow(row) {
+  const cols = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < row.length; i++) {
+    const c = row[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+    else { cur += c; }
+  }
+  cols.push(cur.trim());
+  return cols;
 }
 
 function parseDoors(text) {
